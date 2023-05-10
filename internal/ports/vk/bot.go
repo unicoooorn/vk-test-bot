@@ -13,35 +13,123 @@ import (
 )
 
 const apiAddress string = "https://api.vk.com/method/"
+const apiVersion string = "5.131"
+
 const getServerMethod string = "groups.getLongPollServer"
 const sendMessageMethod string = "messages.send"
-const apiVersion string = "5.131"
+const editGroupMethod = "groups.edit"
 
 type Bot struct {
 	session     LPSession
 	accessToken string
 	wait        int
+	groupId     int
 }
 
-// TODO: internet
-func (b *Bot) sendMessage(to int, text string, k Keyboard) {
-	keyboardParam, _ := json.Marshal(k)
+func newTitleButton(label string, color string) (cbb Button) {
+	body, _ := json.Marshal(map[string]string{
+		"command": changeCmd,
+		"data":    label,
+		"title":   label,
+	})
+
+	cbb.Color = color
+	cbb.Action = Action{
+		Type:    "text",
+		Label:   label,
+		Payload: string(body),
+	}
+	return
+}
+
+func newConfirmButton(label string, color string, title string) (cbb Button) {
+	body, _ := json.Marshal(map[string]string{
+		"command": confirmCmd,
+		"data":    label,
+		"title":   title,
+	})
+
+	cbb.Color = color
+	cbb.Action = Action{
+		Type:    "text",
+		Label:   label,
+		Payload: string(body),
+	}
+	return
+}
+
+func newTitlesKeyboard() *Keyboard {
+	k := &Keyboard{
+		OneTime: true,
+		Inline:  false,
+	}
+	k.Buttons = make([][]Button, 4)
+	k.Buttons[0] = append(k.Buttons[0], newTitleButton("Шрек (фан-страница)", "primary"))
+	k.Buttons[1] = append(k.Buttons[1], newTitleButton("Клуб любителей сусликов", "primary"))
+	k.Buttons[2] = append(k.Buttons[2], newTitleButton("Веду душу к богу", "primary"))
+	k.Buttons[3] = append(k.Buttons[3], newTitleButton("Фантазия закончилась", "primary"))
+	return k
+}
+
+func newConfirmKeyboard(title string) *Keyboard {
+	k := &Keyboard{
+		OneTime: true,
+		Inline:  false,
+	}
+	k.Buttons = make([][]Button, 1)
+	k.Buttons[0] = append(k.Buttons[0], newConfirmButton(yesOption, "positive", title))
+	k.Buttons[0] = append(k.Buttons[0], newConfirmButton(noOption, "negative", title))
+	return k
+}
+
+func (b *Bot) changeGroupTitle(title string) (err error) {
+	parameters := url.Values{}
+	parameters.Set("group_id", strconv.Itoa(b.groupId))
+	parameters.Set("title", title)
+	parameters.Set("access_token", b.accessToken)
+	parameters.Set("v", apiVersion)
+	resp, err := http.PostForm(apiAddress+editGroupMethod, parameters)
+	if err != nil {
+		return err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	fmt.Println(body)
+	return
+}
+
+func (b *Bot) sendKeyboard(to int, text string, k *Keyboard) (err error) {
+	keyboardParam, err := json.Marshal(k)
+	if err != nil {
+		return errors.New("incorrect keyboard format")
+	}
 
 	parameters := url.Values{}
 	parameters.Set("user_id", strconv.Itoa(to))
 	parameters.Set("message", text)
-	//parameters.Set("group_id", "220417305")
 	parameters.Set("access_token", b.accessToken)
 	parameters.Set("v", apiVersion)
 	parameters.Set("random_id", strconv.FormatInt(time.Now().UnixMilli(), 10))
 	parameters.Set("keyboard", string(keyboardParam))
-	resp, err := http.PostForm(apiAddress+sendMessageMethod, parameters)
+	_, err = http.PostForm(apiAddress+sendMessageMethod, parameters)
 	if err != nil {
-		log.Fatal(err.Error())
+		return err
 	}
-	body, _ := io.ReadAll(resp.Body)
-	log.Println(body)
+	return nil
+}
 
+func (b *Bot) sendMessage(to int, text string) (err error) {
+	parameters := url.Values{}
+	parameters.Set("user_id", strconv.Itoa(to))
+	parameters.Set("message", text)
+	parameters.Set("access_token", b.accessToken)
+	parameters.Set("v", apiVersion)
+	parameters.Set("random_id", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	_, err = http.PostForm(apiAddress+sendMessageMethod, parameters)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *Bot) poll() ([]Update, error) {
@@ -50,7 +138,7 @@ func (b *Bot) poll() ([]Update, error) {
 	parameters.Set("act", "a_check")
 	parameters.Set("key", b.session.Key)
 	parameters.Set("ts", b.session.EventNum)
-	parameters.Set("wait", string(b.wait))
+	parameters.Set("wait", strconv.Itoa(b.wait))
 
 	// making request
 	resp, err := http.DefaultClient.PostForm(b.session.Server, parameters)
@@ -112,28 +200,25 @@ func (b *Bot) PollAndServe() {
 			if err != nil {
 				log.Printf("unable to handle message: %s", err.Error())
 			}
-		case "message_event":
-			err := b.handleChoice(u.Object)
-			if err != nil {
-				log.Printf("unable to handle button click: %s", err.Error())
-			}
+		default:
+			log.Printf("unsupported update: %s\n", u.Type)
 		}
 	}
 }
 
-func NewVkBot(token string, groupId string) (*Bot, error) {
+func NewVkBot(token string, groupId int) (*Bot, error) {
 	// building long poll server request
 	parameters := url.Values{}
 	parameters.Set("access_token", token)
 	parameters.Set("v", apiVersion)
-	parameters.Set("group_id", groupId)
+	parameters.Set("group_id", strconv.Itoa(groupId))
 
 	// requesting
 	resp, err := http.PostForm(apiAddress+getServerMethod, parameters)
-	defer resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("getting long poll server error: %w", err)
 	}
+	defer resp.Body.Close()
 
 	// processing response
 	body, err := io.ReadAll(resp.Body)
@@ -148,5 +233,6 @@ func NewVkBot(token string, groupId string) (*Bot, error) {
 	return &Bot{
 		session:     reqResponse.Session,
 		accessToken: token,
+		groupId:     groupId,
 	}, nil
 }

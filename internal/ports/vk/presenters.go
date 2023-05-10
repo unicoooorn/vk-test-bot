@@ -2,26 +2,21 @@ package vk
 
 import "encoding/json"
 
-type CallBack struct {
+type Action struct {
 	Type    string `json:"type"`
 	Label   string `json:"label"`
 	Payload string `json:"payload"`
 }
 
-type ChangeNamePayload struct {
-	cmd      string `json:"command"`
-	newTitle string `json:"new_title"`
-}
-
-type CBButton struct {
-	Action CallBack `json:"action"`
-	Color  string   `json:"color"`
+type Button struct {
+	Action Action `json:"action"`
+	Color  string `json:"color"`
 }
 
 type Keyboard struct {
-	OneTime bool         `json:"one_time"`
-	Buttons [][]CBButton `json:"buttons"`
-	Inline  bool         `json:"inline"`
+	OneTime bool       `json:"one_time"`
+	Buttons [][]Button `json:"buttons"`
+	Inline  bool       `json:"inline"`
 }
 
 type LPSession struct {
@@ -70,12 +65,4 @@ type MessageObject struct {
 		Carousel       bool     `json:"carousel"`
 		LangId         int      `json:"lang_id"`
 	} `json:"client_info"`
-}
-
-type EventObject struct {
-	ConversationMessageId int             `json:"conversation_message_id"`
-	UserId                int             `json:"user_id"`
-	PeerId                int             `json:"peer_id"`
-	EventId               string          `json:"event_id"`
-	Payload               json.RawMessage `json:"payload"`
 }

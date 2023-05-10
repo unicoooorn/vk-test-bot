@@ -7,96 +7,85 @@ import (
 )
 
 const helloMessage = "Здравствуйте! Пожалуйста, выберите следующее название для этого паблика"
-
-func newCBButton(label string, color string) (cbb CBButton) {
-	cbb.Color = color
-	//body, _ := json.Marshal(ChangeNamePayload{cmd: "change_name", newTitle: label})
-
-	cbb.Action = CallBack{
-		Type:    "callback",
-		Label:   label,
-		Payload: fmt.Sprintf("{\"name\":\"%s\"}", label),
-	}
-	return
-}
-
-func (b *Bot) handleStartCmd(obj MessageObject) (err error) {
-	k := Keyboard{
-		OneTime: false,
-		Inline:  true,
-	}
-	k.Buttons = make([][]CBButton, 4)
-	k.Buttons[0] = append(k.Buttons[0], newCBButton("(фан-страница)", "primary"))
-	k.Buttons[1] = append(k.Buttons[1], newCBButton("Клуб любителей сусликов", "primary"))
-	k.Buttons[2] = append(k.Buttons[2], newCBButton("Веду душу к богу", "primary"))
-	k.Buttons[3] = append(k.Buttons[3], newCBButton("Фантазии пришёл конец", "primary"))
-	b.sendMessage(obj.Message.FromId, helloMessage, k)
-	return nil
-}
-
-func (b *Bot) handleTextMessage(obj MessageObject) (err error) {
-	// TODO: sendMessage
-	return nil
-}
-
-const startCmd string = "{\"command\":\"start\"}"
+const confirmationMessageFormat = "Вы уверены, что вам нравится название \"%s\"?"
+const congratsMessage = "Спасибо большое, что поменяли название! Но вы можете сделать это ещё раз!"
+const againMessage = "Пожалуйста, помогите выбрать название."
+const changeCmd = "changeName"
+const confirmCmd = "confirm"
+const startCmd = "start"
+const yesOption = "Да, разумеется"
+const noOption = "Нет, я случайно"
 
 func (b *Bot) handleMessage(rawObject json.RawMessage) (err error) {
 	var obj MessageObject
 	err = json.Unmarshal(rawObject, &obj)
 	if err != nil {
-		return errors.New("unable to marshal object field")
+		return errors.New("unable to unmarshal object field")
 	}
 
-	// if there is a command
-	if obj.Message.Payload == startCmd {
-		//cmd, err := parsePayload(obj.Message.Payload)
-		if err != nil {
-			return errors.New("unable to parse payload")
-		}
-		switch obj.Message.Payload {
-		case startCmd:
-			if err = b.handleStartCmd(obj); err != nil {
-				return fmt.Errorf("unable to handle start message: [%w]", err)
-			}
-		default:
-			return errors.New("unsupported command provided")
-		}
-	} else { // if there is no command
-		if err = b.handleTextMessage(obj); err != nil {
-			return fmt.Errorf("unable to handle text message: [%w]", err)
-		}
+	// handling plain message
+	if obj.Message.Payload == "" {
+		return b.handleTextMessage(obj)
+	}
+
+	// handling messages with commands
+	payload := make(map[string]string)
+	err = json.Unmarshal(json.RawMessage(obj.Message.Payload), &payload)
+	if err != nil {
+		return err
+	}
+
+	switch payload["command"] {
+	case startCmd:
+		err = b.handleStartCmd(obj)
+	case changeCmd:
+		err = b.handleChoice(obj, payload["data"])
+	case confirmCmd:
+		err = b.handleConfirm(obj, payload["data"], payload["title"])
+	default:
+		return errors.New("unsupported command")
+	}
+	if err != nil {
+		return
 	}
 	return nil
 }
 
-func (b *Bot) AskConfirmation(name string, userId int) {
-	k := Keyboard{
-		OneTime: false,
-		Inline:  true,
-	}
-	k.Buttons = make([][]CBButton, 2)
-	k.Buttons[0] = append(k.Buttons[0], newCBButton("Да, разумеется", "positive"))
-	k.Buttons[1] = append(k.Buttons[1], newCBButton("Нет, я случайно нажал", "negative"))
-
-	b.sendMessage(userId, fmt.Sprintf("Вы уверены, что вам нравится название \"%s\"?", name), k)
+func (b *Bot) handleStartCmd(obj MessageObject) (err error) {
+	return b.sendKeyboard(obj.Message.FromId, helloMessage, newTitlesKeyboard())
 }
 
-func (b *Bot) handleChoice(rawObject json.RawMessage) (err error) {
-	var obj EventObject
-	err = json.Unmarshal(rawObject, &obj)
-	if err != nil {
-		return errors.New("unable to marshal object field")
+func (b *Bot) handleTextMessage(obj MessageObject) (err error) {
+	return b.sendMessage(obj.Message.FromId, againMessage)
+}
+
+func (b *Bot) handleConfirm(obj MessageObject, option string, title string) (err error) {
+	switch option {
+	case yesOption:
+		err = b.changeGroupTitle(title)
+		if err != nil {
+			return
+		}
+		err = b.sendKeyboard(obj.Message.FromId, congratsMessage, newTitlesKeyboard())
+	case noOption:
+		err = b.sendKeyboard(obj.Message.FromId, againMessage, newTitlesKeyboard())
+	default:
+		return errors.New("incorrect data in payload")
 	}
-	var nameWrapper map[string]string
-	err = json.Unmarshal(obj.Payload, &nameWrapper)
 	if err != nil {
-		return errors.New("unable to get name wrapper")
+		return
 	}
+	return
+}
 
-	name := nameWrapper["name"]
-
-	b.AskConfirmation(name, obj.UserId)
-
+func (b *Bot) handleChoice(obj MessageObject, choice string) (err error) {
+	err = b.sendKeyboard(
+		obj.Message.FromId,
+		fmt.Sprintf(confirmationMessageFormat, choice),
+		newConfirmKeyboard(choice),
+	)
+	if err != nil {
+		return err
+	}
 	return nil
 }
